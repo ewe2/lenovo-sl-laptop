@@ -92,10 +92,15 @@ MODULE_LICENSE("GPL");
 /* parameters */
 
 static unsigned int dbg_level = LENSL_INFO;
+static int debug_ec;
 static int control_backlight;
 static int bluetooth_auto_enable = 1;
 static int wwan_auto_enable = 1;
 static int uwb_auto_enable = 1;
+module_param(debug_ec, int, S_IRUGO);
+MODULE_PARM_DESC(debug_ec,
+	"Present EC debugging interface in procfs. WARNING: writing to the "
+	"EC can hang your system and possibly damage your hardware.");
 module_param(control_backlight, int, S_IRUGO);
 MODULE_PARM_DESC(control_backlight,
 	"Control backlight brightness; can conflict with ACPI video driver.");
@@ -1354,6 +1359,39 @@ static const struct file_operations proc_fops = {
    	.write = lensl_ec_write_procmem,
 };
 
+static int lenovo_sl_procfs_init(void)
+{
+	struct proc_dir_entry *proc_ec;
+
+	proc_dir = proc_mkdir(LENSL_PROC_DIRNAME, acpi_root_dir);
+	if (!proc_dir) {
+		vdbg_printk(LENSL_ERR,
+		   "Failed to create proc dir acpi/%s/\n", LENSL_PROC_DIRNAME);
+		return -ENOENT;
+	}
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(2,6,29)
+	proc_dir->owner = THIS_MODULE;
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,25)
+	proc_ec = create_proc_entry(LENSL_PROC_EC, 0600, proc_dir);
+#else
+	proc_ec = proc_create(LENSL_PROC_EC, 0600, proc_dir, &proc_fops);
+#endif
+	if (!proc_ec) {
+		vdbg_printk(LENSL_ERR,
+			"Failed to create proc entry acpi/%s/%s\n",
+			LENSL_PROC_DIRNAME, LENSL_PROC_EC);
+		return -ENOENT;
+	}
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,25)
+	proc_ec->proc_fops = &proc_fops;
+#endif
+	vdbg_printk(LENSL_DEBUG, "Initialized procfs debugging interface\n");
+
+	return 0;
+}
+
 /*************************************************************************
     init/exit
  *************************************************************************/
@@ -1415,6 +1453,9 @@ static int __init lenovo_sl_laptop_init(void)
 	mutex_init(&hkey_poll_mutex);
 	hkey_poll_start();
 	hwmon_init();
+
+	if (debug_ec)
+		lenovo_sl_procfs_init();
 
 	vdbg_printk(LENSL_INFO, "Loaded Lenovo ThinkPad SL Series driver\n");
 	return 0;
